@@ -13,7 +13,6 @@ fn main() {
     // dbg!(xor_str);
     // ex 4
     // let file_contents = fs::read_to_string("data/set_of_potential_xor.txt").unwrap();
-    // let char_freq = instanciate_hash_frequency();
     // let min_all = file_contents
     //     .split("\n")
     //     .map(|test_string| get_min_message_decode(test_string, &char_freq))
@@ -21,20 +20,62 @@ fn main() {
     //     .unwrap();
     // dbg!(min_all);
     // ex 5
-    // let message =
-    //     "Burning 'em, if you ain't quick and nimble I go crazy when I hear a cymbal".to_string();
-    // let key = "ICE".to_string();
-    // let bytes_encrypted = encrypt_message_repeating_xor(&message, &key);
-    // let hex_encrypted = byte_vec_to_hex_chars(bytes_encrypted);
-    // dbg!(hex_encrypted);
+    let message =
+        "Burning 'em, if you ain't quick and nimble I go crazy when I hear a cymbal".to_string();
+    let key = "ICE".to_string();
+    let message_bytes: Vec<u8> = message.chars().map(|c| c as u8).collect();
+    let bytes_encrypted = encrypt_message_repeating_xor(&message_bytes, &key);
+    let hex_encrypted = byte_vec_to_hex_chars(bytes_encrypted.clone());
+    dbg!(hex_encrypted);
     // ex 6
     // 2: hamming distance
     let hamming_test = hamming_distance("this is a test", "wokka wokka!!!");
     dbg!(hamming_test);
     // 3
     let file_contents = fs::read_to_string("data/encrypted_message_repeating_xor.txt").unwrap();
-    let bytes = b64_to_bytes(&file_contents.replace("\n", ""));
-    let vec_hamming_with_size: Vec<_> = (1..40)
+    let contents = &file_contents.replace("\n", "");
+    let bytes = b64_to_bytes(&contents);
+    // let results = decrypt_repeating_xor(&bytes);
+    let results = decrypt_repeating_xor(&bytes_encrypted);
+    dbg!(results);
+    // let hex_encrypted = byte_vec_to_hex_chars(bytes_encrypted);
+}
+
+fn decrypt_repeating_xor(bytes: &Vec<u8>) -> String {
+    let char_freq = instanciate_hash_frequency();
+    // dbg!(min_hamming);
+    let keysize_candidate = get_min_hamming(&bytes);
+    let vec_blocks: Vec<String> = (0..keysize_candidate)
+        .map(|skip| {
+            bytes
+                .iter()
+                .skip(skip)
+                .step_by(keysize_candidate)
+                .flat_map(|byte| {
+                    let (c1, c2) = convert_u8_to_hex_tuple(*byte);
+                    [c1, c2].into_iter()
+                })
+                .collect()
+        })
+        .collect();
+
+    // dbg!(vec_blocks[0].clone());
+    // dbg!(vec_blocks[1].clone());
+    let keys: Vec<_> = vec_blocks
+        .into_iter()
+        .map(|str_coded| get_min_message_decode(&str_coded, &char_freq).2)
+        .collect();
+    // dbg!(keys.clone());
+    let string_keys: String = keys.into_iter().map(|k| k as char).collect();
+    // dbg!(string_keys.clone());
+    let bytes_decoded = encrypt_message_repeating_xor(&bytes, &string_keys);
+    let string_decoded: String = bytes_decoded.into_iter().map(|b| b as char).collect();
+    string_decoded
+}
+
+fn get_min_hamming(bytes: &Vec<u8>) -> usize {
+    // let vec_hamming_with_size: Vec<_> = (1..40)
+    let vec_hamming_with_size: Vec<_> = (3..=3)
         .map(|keysize| {
             let mut iter_bytes = bytes.iter();
             let mut_ref_iter = iter_bytes.by_ref();
@@ -60,13 +101,11 @@ fn main() {
             (keysize, normalized_hamming)
         })
         .collect();
-
-    let min_hamming = vec_hamming_with_size
+    vec_hamming_with_size
         .into_iter()
         .min_by(|t1, t2| t1.1.total_cmp(&t2.1))
-        .unwrap();
-    // dbg!(min_hamming);
-    let keysize_candidate = min_hamming.0;
+        .unwrap()
+        .0
 }
 
 fn c_str_to_bytes(c_str: &str) -> Vec<u8> {
@@ -98,12 +137,12 @@ fn hamming_distance(first: &str, second: &str) -> u32 {
     hamming_distance_bytes(&bytes_first, &bytes_second)
 }
 
-fn encrypt_message_repeating_xor(message: &str, key: &str) -> Vec<u8> {
+fn encrypt_message_repeating_xor(message: &Vec<u8>, key: &str) -> Vec<u8> {
     message
-        .chars()
+        .into_iter()
         .zip(key.chars().cycle())
         .map(|(c, char_key)| {
-            let byte_c = c as u8;
+            let byte_c = *c;
             let byte_key = char_key as u8;
             byte_c ^ byte_key
         })
@@ -193,7 +232,7 @@ fn b64_to_bytes(b64: &str) -> Vec<u8> {
 }
 
 fn letter_to_6_bits(letter: char) -> u8 {
-    dbg!(letter.clone());
+    // dbg!(letter.clone());
     match letter {
         'A'..='Z' => letter as u8 - 'A' as u8,
         'a'..='z' => letter as u8 - 'a' as u8 + 26u8,
@@ -285,10 +324,13 @@ fn convert_6_bits_to_letter(value: u8) -> char {
 
 fn instanciate_hash_frequency() -> HashMap<char, f64> {
     let mut hashmap = HashMap::new();
-    hashmap.insert('e', 0.111);
+    hashmap.insert('e', 0.1);
     hashmap.insert('a', 0.085);
-    hashmap.insert('r', 0.075);
-    hashmap.insert('i', 0.075);
+    // hashmap.insert('r', 0.075);
+    // hashmap.insert('i', 0.075);
+    // hashmap.insert('t', 0.09);
+    // hashmap.insert('o', 0.07);
+    // hashmap.insert('n', 0.06);
     hashmap.insert(' ', 0.16);
     hashmap
 }
@@ -312,5 +354,10 @@ fn score_string(decoded: &str, char_freq: &HashMap<char, f64>) -> f64 {
         let score_letter = get_score_freq(char_freq.get(c_test).cloned(), freq);
         score += score_letter;
     }
-    score
+    let sum_alpha = decoded
+        .chars()
+        .map(|c| if 'a' <= c && c <= 'z' { -1f64 } else { 0f64 })
+        .sum::<f64>()
+        / decoded.len() as f64;
+    score + sum_alpha
 }
