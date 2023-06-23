@@ -22,8 +22,8 @@ pub fn encrypt_ecb(to_encrypt: &[u8], key: &[u8]) -> Vec<u8> {
 pub fn decrypt_ecb(to_decrypt: &[u8], key: &Vec<u8>) -> Vec<u8> {
     let cipher = Cipher::aes_128_ecb();
     let mut ctx = CipherCtx::new().unwrap();
-    dbg!(to_decrypt.len());
-    dbg!(key.len());
+    // dbg!(to_decrypt.len());
+    // dbg!(key.len());
     ctx.decrypt_init(Some(cipher), Some(&key), None).unwrap();
     let mut plaintext = vec![];
     ctx.cipher_update_vec(&to_decrypt, &mut plaintext).unwrap();
@@ -78,29 +78,53 @@ pub fn fixed_xor(bytes_1: &[u8], bytes_2: &[u8]) -> Vec<u8> {
         .collect()
 }
 
-pub fn hex_to_byte_vec(hex: &str) -> Vec<u8> {
-    let chars: Vec<char> = hex.chars().collect();
-    chars
-        .chunks(2)
-        .map(|chunk| {
-            let c1 = chunk[0];
-            let c2 = chunk[1];
-            convert_hex_tuple_to_u8((c1, c2))
+// pub fn hex_to_byte_vec(hex: &str) -> Vec<u8> {
+//     let chars: Vec<char> = hex.chars().collect();
+//     chars
+//         .chunks(2)
+//         .map(|chunk| {
+//             let c1 = chunk[0];
+//             let c2 = chunk[1];
+//             convert_hex_tuple_to_u8((c1, c2))
+//         })
+//         .collect()
+// }
+//
+// fn convert_hex_tuple_to_u8(tuple_hex: (char, char)) -> u8 {
+//     let first_4_bit = convert_hex_char_to_u8(tuple_hex.0);
+//     let last_4_bit = convert_hex_char_to_u8(tuple_hex.1);
+//     (first_4_bit << 4u8) + last_4_bit
+// }
+//
+// fn convert_hex_char_to_u8(c: char) -> u8 {
+//     let char_num = match c {
+//         '0'..='9' => c as u8 - '0' as u8,
+//         'a'..='f' => c as u8 - 'a' as u8 + 10u8,
+//         _ => panic!("Input string is not in hexadecimal"),
+//     };
+//     char_num
+// }
+//
+pub fn has_repeating_bytes(vec_bytes: Vec<u8>) -> bool {
+    // dbg!(vec_bytes.len());
+    // detect repeats
+    let bytes_copy = vec_bytes.clone();
+    let repeated_block = vec_bytes
+        .chunks(16)
+        .enumerate()
+        .map(|(index_left, slice_ref)| {
+            bytes_copy
+                .chunks(16)
+                .enumerate()
+                .filter_map(|(index_right, slice_test)| {
+                    if index_left == index_right {
+                        None
+                    } else {
+                        Some(slice_test)
+                    }
+                })
+                .any(|slice_test| slice_ref == slice_test)
         })
-        .collect()
-}
-
-fn convert_hex_tuple_to_u8(tuple_hex: (char, char)) -> u8 {
-    let first_4_bit = convert_hex_char_to_u8(tuple_hex.0);
-    let last_4_bit = convert_hex_char_to_u8(tuple_hex.1);
-    (first_4_bit << 4u8) + last_4_bit
-}
-
-fn convert_hex_char_to_u8(c: char) -> u8 {
-    let char_num = match c {
-        '0'..='9' => c as u8 - '0' as u8,
-        'a'..='f' => c as u8 - 'a' as u8 + 10u8,
-        _ => panic!("Input string is not in hexadecimal"),
-    };
-    char_num
+        .any(|repeated| repeated);
+    repeated_block
 }

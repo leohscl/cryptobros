@@ -378,27 +378,43 @@ fn ex7() {
 
 fn ex8() {
     let file_contents = fs::read_to_string("data/encrypted_ecb_candidates.txt").unwrap();
-    let min_all = file_contents
+    let mut test_num = 0;
+    let count_repeated = file_contents
         .trim_matches('\n')
         .split("\n")
-        .enumerate()
-        .map(|(index, test_string)| {
-            // we count the number of redundancies between blocks of 16 bytes
+        .map(move |test_string| {
             let bytes_candidates = hex_string_to_byte_vec(test_string);
-            let sum_hammings: u32 = bytes_candidates
-                .windows(32)
-                .step_by(16)
-                .map(|slice| {
-                    let set_1 = &slice[0..16];
-                    let set_2 = &slice[16..32];
-                    let hamming = hamming_distance_bytes(set_1, set_2);
-                    hamming
-                })
-                .sum();
-            dbg!(sum_hammings);
-            (index, sum_hammings)
+            has_repeating_bytes(bytes_candidates)
         })
-        .min_by(|t1, t2| t1.1.cmp(&t2.1))
-        .unwrap();
-    dbg!(min_all);
+        .filter(|repeated| {
+            println!("test: {}", test_num);
+            test_num += 1;
+            *repeated
+        })
+        .count();
+    dbg!(count_repeated);
+}
+
+fn has_repeating_bytes(vec_bytes: Vec<u8>) -> bool {
+    // dbg!(vec_bytes.len());
+    // detect repeats
+    let bytes_copy = vec_bytes.clone();
+    let repeated_block = vec_bytes
+        .chunks(16)
+        .enumerate()
+        .map(|(index_left, slice_ref)| {
+            bytes_copy
+                .chunks(16)
+                .enumerate()
+                .filter_map(|(index_right, slice_test)| {
+                    if index_left == index_right {
+                        None
+                    } else {
+                        Some(slice_test)
+                    }
+                })
+                .any(|slice_test| slice_ref == slice_test)
+        })
+        .any(|repeated| repeated);
+    repeated_block
 }

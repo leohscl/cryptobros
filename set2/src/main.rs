@@ -1,4 +1,6 @@
 mod utils;
+use rand::Rng;
+use std::collections::HashMap;
 use std::fs;
 use utils::b64_to_bytes;
 use utils::bytes_as_string;
@@ -6,88 +8,164 @@ use utils::c_str_to_bytes;
 use utils::decrypt_ecb;
 use utils::encrypt_ecb;
 use utils::fixed_xor;
+use utils::has_repeating_bytes;
 
 fn main() {
     ex9();
     ex10();
+    ex11();
+    ex12();
+}
+
+fn ex12() {
+    let unknown_key = generate_aes_key();
+    let unknown_b64 = "Um9sbGluJyBpbiBteSA1LjAKV2l0aCBteSByYWctdG9wIGRvd24gc28gbXkg\
+                        aGFpciBjYW4gYmxvdwpUaGUgZ2lybGllcyBvbiBzdGFuZGJ5IHdhdmluZyBq\
+                        dXN0IHRvIHNheSBoaQpEaWQgeW91IHN0b3A/IE5vLCBJIGp1c3QgZHJvdmUg\
+                        YnkK";
+    let unknown_message = b64_to_bytes(unknown_b64);
+    let plain_bytes = decipher_using_oracle(&unknown_message, &unknown_key);
+    dbg!(bytes_as_string(&plain_bytes));
+}
+
+fn decipher_using_oracle(unknown_message: &Vec<u8>, unknown_key: &Vec<u8>) -> Vec<u8> {
+    let block_size = get_block_size_bytes(&unknown_message, &unknown_key);
+    // dbg!(block_size);
+    let repeated_bytes: Vec<u8> = std::iter::repeat(0u8).take(block_size * 4).collect();
+    let encode_repetition = encryption_oracle_ecb(&repeated_bytes, &unknown_message, &unknown_key);
+    let is_ecb = has_repeating_bytes(encode_repetition);
+    // dbg!(is_ecb);
+    let mut decoded_bytes = vec![];
+    assert!(block_size >= 2);
+    if is_ecb {
+        while decoded_bytes.len() != unknown_message.len() {
+            let length_decoded_needed = decoded_bytes.len() % block_size;
+            let short_1_byte: Vec<u8> = std::iter::repeat(0u8)
+                .take(block_size - 1 - length_decoded_needed)
+                .chain(decoded_bytes.iter().cloned().take(length_decoded_needed))
+                .collect();
+            // dbg!(&short_1_byte);
+            let mut all_potential_encoding = HashMap::new();
+            let remaining_encoded = &unknown_message[decoded_bytes.len()..];
+            for potential_byte in 0..255 {
+                let plain_test: Vec<_> = short_1_byte
+                    .iter()
+                    .cloned()
+                    .chain(std::iter::once(potential_byte))
+                    .collect();
+                let potential_encoding =
+                    encryption_oracle_ecb(&plain_test, remaining_encoded, &unknown_key);
+                let first_block_plain: Vec<_> = plain_test.into_iter().take(block_size).collect();
+                let first_block_encoded: Vec<_> =
+                    potential_encoding.into_iter().take(block_size).collect();
+                all_potential_encoding.insert(first_block_encoded, first_block_plain);
+            }
+
+            let encode_1_byte_hidden =
+                encryption_oracle_ecb(&short_1_byte, remaining_encoded, &unknown_key);
+            let first_block_encoded_1_byte_hidden: Vec<_> =
+                encode_1_byte_hidden.into_iter().take(block_size).collect();
+            let first_block_plain_1_byte_hidden = all_potential_encoding
+                .get(&first_block_encoded_1_byte_hidden)
+                .unwrap();
+            let plain_byte = first_block_plain_1_byte_hidden.last().unwrap();
+            decoded_bytes.push(*plain_byte);
+        }
+    } else {
+        panic!("Not ecb !");
+    }
+    decoded_bytes
+    // todo!()
+}
+
+fn get_block_size_bytes(unknown_message: &Vec<u8>, unknown_key: &Vec<u8>) -> usize {
+    let encryption_base_size = encryption_oracle_ecb(&vec![], unknown_message, unknown_key).len();
+    let mut encryption_next_size;
+    let mut count = 1;
+    let byte_difference = loop {
+        let prepend: Vec<_> = std::iter::repeat(0u8).take(count).collect();
+        encryption_next_size = encryption_oracle_ecb(&prepend, unknown_message, unknown_key).len();
+        if encryption_base_size != encryption_next_size {
+            break (encryption_next_size - encryption_base_size);
+        }
+        count += 1;
+    };
+    byte_difference
+}
+
+fn encryption_oracle_ecb(prepend_text: &[u8], plain_bytes: &[u8], unknown_key: &[u8]) -> Vec<u8> {
+    let to_encrypt: Vec<_> = prepend_text
+        .into_iter()
+        .chain(plain_bytes.into_iter())
+        .cloned()
+        .collect();
+    encrypt_ecb(&to_encrypt, unknown_key)
+}
+
+fn ex11() {
+    let message = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string();
+    let bytes_msg = c_str_to_bytes(&message);
+    for _ in 0..10 {
+        let (ecb_used, encrypted) = encryption_oracle(bytes_msg.clone());
+        assert!(ecb_used == has_repeating_bytes(encrypted));
+    }
+}
+
+fn generate_5_10_bytes() -> Vec<u8> {
+    let mut rng = rand::thread_rng();
+    let mut bytes = Vec::new();
+    let number = rng.gen_range(5..=10) as usize;
+    for _ in 0..number {
+        let rand_byte: u8 = rng.gen();
+        bytes.push(rand_byte);
+    }
+    bytes
+}
+
+fn generate_aes_key() -> Vec<u8> {
+    let mut rng = rand::thread_rng();
+    let mut key = Vec::new();
+    for _ in 0..16 {
+        let rand_byte: u8 = rng.gen();
+        key.push(rand_byte);
+    }
+    key
+}
+
+fn encryption_oracle(bytes: Vec<u8>) -> (bool, Vec<u8>) {
+    let mut rng = rand::thread_rng();
+    let random_prefix = generate_5_10_bytes();
+    let random_suffix = generate_5_10_bytes();
+    let to_encrypt: Vec<_> = random_prefix
+        .into_iter()
+        .chain(bytes.into_iter())
+        .chain(random_suffix.into_iter())
+        .collect();
+
+    let key = generate_aes_key();
+    let use_ecb = rng.gen_bool(0.5);
+    let encrypted = if use_ecb {
+        encrypt_ecb(&to_encrypt, &key)
+    } else {
+        let random_iv = generate_aes_key();
+        encrypt_cbc(&to_encrypt, &key, &random_iv)
+    };
+    (use_ecb, encrypted)
 }
 
 fn ex10() {
     // testing 0
     let key_string = "YELLOW SUBMARINE".to_string();
     let key = c_str_to_bytes(&key_string);
-    // let file_contents = fs::read_to_string("data/encrypted_ECB_AES-128.txt").unwrap();
-    // let contents = &file_contents.replace("\n", "");
-    // let bytes = b64_to_bytes(&contents);
-    let empty_vec = vec![];
-    let encoded_padding_16 = encrypt_ecb(&empty_vec, &key);
-    // let message = decrypt_ecb(&bytes, &key);
-    // let decoded = bytes_as_string(&message);
-    // dbg!(decoded);
-    // let reencoded = encrypt_ecb(&message, &key);
-    // assert!(reencoded == bytes);
-    // testing 1
-    // let padding_16: Vec<_> = std::iter::repeat(16u8).take(16).collect();
-    // let mut trucated_encoded: Vec<u8> = bytes[0..16].into_iter().cloned().collect();
-    // trucated_encoded.extend_from_slice(&encoded_padding_16);
-    // let message_truncated = decrypt_ecb(&trucated_encoded, &key);
-    // let decoded_truncated = bytes_as_string(&message_truncated);
-    // dbg!(decoded_truncated);
-    // let reencoded = encrypt_ecb(&message, &key);
-    // assert!(reencoded == bytes);
-    // testing 2
-    // let key_string = "YELLOW SUBMARINE".to_string();
-    // let key = c_str_to_bytes(&key_string);
-    // let msg = "HELLO SUBMARIN".to_string();
-    // let msg_bytes = c_str_to_bytes(&msg);
-    // dbg!(msg_bytes.len());
-    // let encoded_bytes = encrypt_ecb(&msg_bytes, &key);
-    // dbg!(encoded_bytes.len());
-    // dbg!(encoded_bytes.clone());
-    // // let mut encoded_bytes_2: Vec<u8> = encoded_bytes[0..16].into_iter().cloned().collect();
-    // // dbg!(encoded_bytes_2.len());
-    // // pcks7_padding(&mut encoded_bytes_2, 16);
-    // // dbg!(encoded_bytes_2.len());
-    // let decoded_bytes = decrypt_ecb(&encoded_bytes, &key);
-    // let msg_decoded = bytes_as_string(&decoded_bytes);
-    // dbg!(&msg_decoded);
-    // assert!(msg_decoded == msg);
-    // testing 3
-    // let file_contents = fs::read_to_string("data/encrypted_ECB_AES-128.txt").unwrap();
-    // let contents = &file_contents.replace("\n", "");
-    // let bytes = &b64_to_bytes(&contents)[..16];
-    // let bytes_subset: Vec<_> = bytes[0..128]
-    //     .into_iter()
-    //     .cloned()
-    //     .chain(bytes[(128 * 22)..2880].into_iter().cloned())
-    //     .collect();
-    // let message = decrypt_ecb(&bytes_subset, &key);
-    // let decoded = bytes_as_string(&message);
-    // dbg!(decoded);
-    // let reencoded = encrypt_ecb(&message, &key);
-    // assert!(reencoded == bytes);
-    // decrypting file
     let file_contents = fs::read_to_string("data/encrypted_block_CBC.txt").unwrap();
     let contents = &file_contents.replace("\n", "");
     let bytes_encrypted = b64_to_bytes(&contents);
-    // let first_block = &bytes_encrypted[0..16];
-    // let test_with_first: Vec<_> = first_block
-    //     .into_iter()
-    //     .cloned()
-    //     .chain(encoded_padding_16.into_iter())
-    //     .collect();
-    // let first_block_plain = decrypt_ecb(&test_with_first, &key);
-    // let block_msg = bytes_as_string(&first_block_plain);
-    // dbg!(block_msg);
     let iv = vec![0u8; key.len()];
     let decrypted_msg = decrypt_cbc(&bytes_encrypted, &key, &iv);
     let reencrypted = encrypt_cbc(&decrypted_msg, &key, &iv);
-    dbg!(bytes_encrypted.len());
-    dbg!(reencrypted.len());
+    // dbg!(bytes_encrypted.len());
+    // dbg!(reencrypted.len());
     assert_eq!(bytes_encrypted, reencrypted);
-    // let fixed = fixed_xor(&bytes_encrypted, &reencrypted);
-    // dbg!(&fixed);
-    // dbg!(fixed.into_iter().sum::<u8>());
     let msg_as_txt = bytes_as_string(&decrypted_msg);
     dbg!(msg_as_txt);
 }
