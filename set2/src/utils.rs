@@ -19,7 +19,7 @@ pub fn encrypt_ecb(to_encrypt: &[u8], key: &[u8]) -> Vec<u8> {
     plaintext
 }
 
-pub fn decrypt_ecb(to_decrypt: &[u8], key: &Vec<u8>) -> Vec<u8> {
+pub fn decrypt_ecb(to_decrypt: &[u8], key: &[u8]) -> Vec<u8> {
     let cipher = Cipher::aes_128_ecb();
     let mut ctx = CipherCtx::new().unwrap();
     // dbg!(to_decrypt.len());

@@ -10,63 +10,187 @@ use utils::encrypt_ecb;
 use utils::fixed_xor;
 use utils::has_repeating_bytes;
 
+static mut KEY: Vec<u8> = Vec::new();
+static mut RANDOM_BYTES: Vec<u8> = Vec::new();
+static UNKNOWN_B64: &str = "Um9sbGluJyBpbiBteSA1LjAKV2l0aCBteSByYWctdG9wIGRvd24gc28gbXkg\
+                        aGFpciBjYW4gYmxvdwpUaGUgZ2lybGllcyBvbiBzdGFuZGJ5IHdhdmluZyBq\
+                        dXN0IHRvIHNheSBoaQpEaWQgeW91IHN0b3A/IE5vLCBJIGp1c3QgZHJvdmUg\
+                        YnkK";
+
 fn main() {
+    let random_key = generate_aes_key();
+    unsafe {
+        KEY = random_key;
+    }
+    let mut rng = rand::thread_rng();
+    let size_prepend = rng.gen_range(1..=100) as usize;
+    let mut prepend_random = Vec::with_capacity(size_prepend);
+    for _ in 0..size_prepend {
+        let rand_byte: u8 = rng.gen();
+        prepend_random.push(rand_byte);
+    }
+    unsafe {
+        RANDOM_BYTES = prepend_random;
+    }
     ex9();
     ex10();
     ex11();
     ex12();
+    ex13();
+    // ex14();
+}
+// fn ex14() {}
+fn ex13() {
+    let test_string = "foo=bar&baz=qux&zap=zazzle";
+    let map_test = k_b_parsing(test_string).unwrap();
+    let decoded_test = profile_as_k_b(&map_test);
+    dbg!(decoded_test);
+    // let profile_kb = profile_for("foo@bar.com");
+    // dbg!(&profile_kb);
+    let admin_profile = make_admin_profile();
+    let decoded_admin = decrypt_user_profile(&admin_profile);
+    let admin_str = bytes_as_string(&decoded_admin);
+    dbg!(&admin_str);
 }
 
-fn ex12() {
-    let unknown_key = generate_aes_key();
-    let unknown_b64 = "Um9sbGluJyBpbiBteSA1LjAKV2l0aCBteSByYWctdG9wIGRvd24gc28gbXkg\
-                        aGFpciBjYW4gYmxvdwpUaGUgZ2lybGllcyBvbiBzdGFuZGJ5IHdhdmluZyBq\
-                        dXN0IHRvIHNheSBoaQpEaWQgeW91IHN0b3A/IE5vLCBJIGp1c3QgZHJvdmUg\
-                        YnkK";
-    let unknown_message = b64_to_bytes(unknown_b64);
-    let plain_bytes = decipher_using_oracle(&unknown_message, &unknown_key);
-    dbg!(bytes_as_string(&plain_bytes));
+fn encrypt_profile(email: &str) -> Vec<u8> {
+    let profile_kb = profile_for(&email);
+    // dbg!(&map_profile);
+    // let profile_kb = profile_as_k_b(&map_profile);
+    // dbg!(&profile_kb);
+    let plain_bytes = c_str_to_bytes(&profile_kb);
+    // dbg!(&plain_bytes);
+    let encrypted = encrypt_user_profile(&plain_bytes);
+    encrypted
 }
 
-fn decipher_using_oracle(unknown_message: &Vec<u8>, unknown_key: &Vec<u8>) -> Vec<u8> {
-    let block_size = get_block_size_bytes(&unknown_message, &unknown_key);
+fn make_admin_profile() -> Vec<u8> {
+    // "email=aaaaa@bar.com&uid=10&role=user"
+    //  12345678123456781234567812345678
+    // get first part of result
+    let email_part_1 = "aaaaa@bar.com";
+    let bytes_email_p1 = encrypt_profile(email_part_1);
+    assert_eq!(bytes_email_p1.len(), 48);
+    let bytes_1: Vec<u8> = bytes_email_p1.into_iter().take(32).collect();
+
+    // "email=aaaaaaaaa@adminUUUUUUUUUUU&uid=10&role=user"
+    //  12345678123456781234567812345678
+    //  email=aaaaaaaaa@adminTTTTTTTTTTT
+    // get second part of result
+    let mut email_start_bytes = c_str_to_bytes("aaaaaaaaa@admin");
+    let email_padding_bytes = std::iter::repeat(11u8).take(11);
+    email_start_bytes.extend(email_padding_bytes);
+    assert_eq!(email_start_bytes.len(), 26);
+    let encrypted_email_bytes = encrypt_profile(&bytes_as_string(&email_start_bytes));
+    let bytes_admin = encrypted_email_bytes.into_iter().skip(16).take(16);
+    let mut bytes_full = bytes_1.clone();
+    bytes_full.extend(bytes_admin);
+    bytes_full
+}
+
+fn encrypt_user_profile(profile: &[u8]) -> Vec<u8> {
+    let key;
+    unsafe {
+        key = KEY.clone();
+    }
+    encrypt_ecb(profile, &key)
+}
+
+fn decrypt_user_profile(profile_encoded: &[u8]) -> Vec<u8> {
+    let key;
+    unsafe {
+        key = KEY.clone();
+    }
+    decrypt_ecb(profile_encoded, &key)
+}
+
+fn profile_for(email: &str) -> String {
+    let no_meta_email: String = email.chars().filter(|&c| c != '&' && c != '=').collect();
+    let encoded_str = format!("email={}&uid=10&role=user", no_meta_email);
+    // bg!(&encoded_str);
+    // k_b_parsing(&encoded_str).expect("Parsing should not fail here")
+    encoded_str
+}
+
+fn profile_as_k_b(map: &HashMap<String, String>) -> String {
+    let vec_res: Vec<String> = map
+        .into_iter()
+        .map(|(key, value)| {
+            let mut return_str = key.to_string();
+            return_str.extend(std::iter::once('=').chain(value.chars()));
+            return_str
+        })
+        .collect();
+    vec_res.join("&")
+}
+
+fn k_b_parsing(input: &str) -> Result<HashMap<String, String>, ()> {
+    input
+        .split('&')
+        .map(|substr| {
+            let mut iterate_eq = substr.split('=');
+            let first = iterate_eq.next().ok_or(())?;
+            let second = iterate_eq.next().ok_or(())?;
+            Ok((first.to_string(), second.to_string()))
+        })
+        .collect()
+}
+
+fn decipher_using_oracle() -> Vec<u8> {
+    let (reminder, block_size) = get_block_size_bytes_and_reminder();
     // dbg!(block_size);
     let repeated_bytes: Vec<u8> = std::iter::repeat(0u8).take(block_size * 4).collect();
-    let encode_repetition = encryption_oracle_ecb(&repeated_bytes, &unknown_message, &unknown_key);
+    let encode_repetition = encryption_oracle_ecb(&repeated_bytes);
     let is_ecb = has_repeating_bytes(encode_repetition);
+    let message_to_decrypt = encryption_oracle_ecb(&vec![]);
     // dbg!(is_ecb);
-    let mut decoded_bytes = vec![];
+    let mut decoded_bytes = vec![0u8; block_size];
     assert!(block_size >= 2);
+
+    // let num_block_decipher = message_to_decrypt.len() / block_size;
     if is_ecb {
-        while decoded_bytes.len() != unknown_message.len() {
-            let length_decoded_needed = decoded_bytes.len() % block_size;
-            let short_1_byte: Vec<u8> = std::iter::repeat(0u8)
-                .take(block_size - 1 - length_decoded_needed)
-                .chain(decoded_bytes.iter().cloned().take(length_decoded_needed))
+        while decoded_bytes.len() != (message_to_decrypt.len() + reminder) {
+            // will be used
+            let short_1_byte: Vec<u8> = decoded_bytes
+                .clone()
+                .into_iter()
+                .rev()
+                .take(block_size - 1)
+                .rev()
                 .collect();
             // dbg!(&short_1_byte);
+
             let mut all_potential_encoding = HashMap::new();
-            let remaining_encoded = &unknown_message[decoded_bytes.len()..];
+            // check all potential hash
             for potential_byte in 0..255 {
                 let plain_test: Vec<_> = short_1_byte
                     .iter()
                     .cloned()
                     .chain(std::iter::once(potential_byte))
                     .collect();
-                let potential_encoding =
-                    encryption_oracle_ecb(&plain_test, remaining_encoded, &unknown_key);
+                let potential_encoding = encryption_oracle_ecb(&plain_test);
                 let first_block_plain: Vec<_> = plain_test.into_iter().take(block_size).collect();
                 let first_block_encoded: Vec<_> =
                     potential_encoding.into_iter().take(block_size).collect();
                 all_potential_encoding.insert(first_block_encoded, first_block_plain);
             }
+            let length_decoded_needed = decoded_bytes.len() % block_size;
+            let garbage_append: Vec<_> = std::iter::repeat(0u8)
+                .take(block_size - 1 - length_decoded_needed)
+                .collect();
 
-            let encode_1_byte_hidden =
-                encryption_oracle_ecb(&short_1_byte, remaining_encoded, &unknown_key);
-            let first_block_encoded_1_byte_hidden: Vec<_> =
-                encode_1_byte_hidden.into_iter().take(block_size).collect();
+            let num_skip = decoded_bytes.len() - length_decoded_needed - block_size;
+            // dbg!(decoded_bytes.len());
+            // dbg!(num_skip);
+            let encode_right_number_hidden = encryption_oracle_ecb(&garbage_append);
+            let encoded_block_of_interest: Vec<_> = encode_right_number_hidden
+                .into_iter()
+                .skip(num_skip)
+                .take(block_size)
+                .collect();
+
             let first_block_plain_1_byte_hidden = all_potential_encoding
-                .get(&first_block_encoded_1_byte_hidden)
+                .get(&encoded_block_of_interest)
                 .unwrap();
             let plain_byte = first_block_plain_1_byte_hidden.last().unwrap();
             decoded_bytes.push(*plain_byte);
@@ -74,32 +198,59 @@ fn decipher_using_oracle(unknown_message: &Vec<u8>, unknown_key: &Vec<u8>) -> Ve
     } else {
         panic!("Not ecb !");
     }
-    decoded_bytes
-    // todo!()
+    decoded_bytes.into_iter().skip(16).collect()
 }
 
-fn get_block_size_bytes(unknown_message: &Vec<u8>, unknown_key: &Vec<u8>) -> usize {
-    let encryption_base_size = encryption_oracle_ecb(&vec![], unknown_message, unknown_key).len();
+fn get_block_size_bytes_and_reminder() -> (usize, usize) {
+    let encryption_base_size = encryption_oracle_ecb(&vec![]).len();
     let mut encryption_next_size;
     let mut count = 1;
-    let byte_difference = loop {
+    let reminder_and_size = loop {
         let prepend: Vec<_> = std::iter::repeat(0u8).take(count).collect();
-        encryption_next_size = encryption_oracle_ecb(&prepend, unknown_message, unknown_key).len();
+        encryption_next_size = encryption_oracle_ecb(&prepend).len();
         if encryption_base_size != encryption_next_size {
-            break (encryption_next_size - encryption_base_size);
+            break (count, (encryption_next_size - encryption_base_size));
         }
         count += 1;
     };
-    byte_difference
+    reminder_and_size
 }
 
-fn encryption_oracle_ecb(prepend_text: &[u8], plain_bytes: &[u8], unknown_key: &[u8]) -> Vec<u8> {
+fn encryption_oracle_ecb(prepend_text: &[u8]) -> Vec<u8> {
+    let plain_bytes = b64_to_bytes(UNKNOWN_B64);
+    let unknown_key;
+    unsafe {
+        unknown_key = KEY.clone();
+    }
     let to_encrypt: Vec<_> = prepend_text
         .into_iter()
-        .chain(plain_bytes.into_iter())
+        .chain(plain_bytes.iter())
         .cloned()
         .collect();
-    encrypt_ecb(&to_encrypt, unknown_key)
+    encrypt_ecb(&to_encrypt, &unknown_key)
+}
+
+// fn encryption_oracle_random_bytes_ecb(
+//     prepend_text: &[u8],
+//     plain_bytes: &[u8],
+//     unknown_key: &[u8],
+// ) -> Vec<u8> {
+//     let prepend_random;
+//     unsafe {
+//         prepend_random = RANDOM_BYTES.clone();
+//     }
+//     let to_encrypt: Vec<_> = prepend_random
+//         .iter()
+//         .chain(prepend_text.into_iter())
+//         .chain(plain_bytes.into_iter())
+//         .cloned()
+//         .collect();
+//     encrypt_ecb(&to_encrypt, unknown_key)
+// }
+
+fn ex12() {
+    let plain_bytes = decipher_using_oracle();
+    dbg!(bytes_as_string(&plain_bytes));
 }
 
 fn ex11() {
@@ -113,8 +264,8 @@ fn ex11() {
 
 fn generate_5_10_bytes() -> Vec<u8> {
     let mut rng = rand::thread_rng();
-    let mut bytes = Vec::new();
     let number = rng.gen_range(5..=10) as usize;
+    let mut bytes = Vec::new();
     for _ in 0..number {
         let rand_byte: u8 = rng.gen();
         bytes.push(rand_byte);
