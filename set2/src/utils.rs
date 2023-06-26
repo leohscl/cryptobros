@@ -105,11 +105,29 @@ pub fn fixed_xor(bytes_1: &[u8], bytes_2: &[u8]) -> Vec<u8> {
 //     char_num
 // }
 //
-pub fn has_repeating_bytes(vec_bytes: Vec<u8>) -> bool {
-    // dbg!(vec_bytes.len());
+pub fn get_consecutive_repeat_index(vec_bytes: Vec<u8>, block_size: usize) -> Option<usize> {
+    // detect repeats
+    vec_bytes
+        .windows(block_size * 2)
+        .step_by(block_size)
+        .map(|window| {
+            let slice1 = &window[0..block_size];
+            let slice2 = &window[block_size..(block_size * 2)];
+            slice1 == slice2
+        })
+        .enumerate()
+        .find_map(|(index, equal)| {
+            if equal {
+                Some(index * block_size + block_size * 2)
+            } else {
+                None
+            }
+        })
+}
+pub fn count_repeating_bytes(vec_bytes: Vec<u8>) -> u32 {
     // detect repeats
     let bytes_copy = vec_bytes.clone();
-    let repeated_block = vec_bytes
+    vec_bytes
         .chunks(16)
         .enumerate()
         .map(|(index_left, slice_ref)| {
@@ -125,6 +143,6 @@ pub fn has_repeating_bytes(vec_bytes: Vec<u8>) -> bool {
                 })
                 .any(|slice_test| slice_ref == slice_test)
         })
-        .any(|repeated| repeated);
-    repeated_block
+        .map(|b| if b { 1 } else { 0 })
+        .sum()
 }
