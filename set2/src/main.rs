@@ -19,6 +19,9 @@ static UNKNOWN_B64: &str = "Um9sbGluJyBpbiBteSA1LjAKV2l0aCBteSByYWctdG9wIGRvd24g
                         dXN0IHRvIHNheSBoaQpEaWQgeW91IHN0b3A/IE5vLCBJIGp1c3QgZHJvdmUg\
                         YnkK";
 
+#[derive(Debug)]
+struct PkcsError;
+
 fn main() {
     let random_key = generate_aes_key();
     unsafe {
@@ -40,6 +43,135 @@ fn main() {
     ex12();
     ex13();
     ex14();
+    ex15();
+    ex16();
+}
+
+fn ex16() {
+    let test_str_1 = "Hello everybody tout le monde";
+    let encoded_test_1 = encode_cbc_with_prepend_and_append(test_str_1);
+    assert!(!decode_cbc_find_admin(&encoded_test_1));
+    let test_str_2 = "Hello ! ;admin=true;Everything looks okay here !";
+    let encoded_test_2 = encode_cbc_with_prepend_and_append(test_str_2);
+    assert!(!decode_cbc_find_admin(&encoded_test_2));
+    let test_admin_true = "test=hello;admin=true;hello=test";
+    let key;
+    unsafe {
+        key = KEY.clone();
+    }
+    let mut test_admin_bytes = c_str_to_bytes(test_admin_true);
+    pcks7_padding(&mut test_admin_bytes, 16);
+    let admin_encrypted = encrypt_cbc(&test_admin_bytes, &key, &vec![0u8; 16]);
+    assert!(decode_cbc_find_admin(&admin_encrypted));
+    let admin_cbc_encoded = create_admin_cbc();
+    let has_admin = decode_cbc_find_admin(&admin_cbc_encoded);
+    assert!(has_admin);
+}
+
+fn create_admin_cbc() -> Vec<u8> {
+    let prepend = "comment1=cooking%20MCs;userdata=";
+    let append = ";comment2=%20like%20a%20pound%20of%20bacon";
+    let string_no_input = format!("{}{}", prepend, append);
+    let block_size = 16;
+    let start_of_bitflip = prepend.len() - (prepend.len() % block_size) - block_size;
+    let start_target_bitflip = start_of_bitflip + block_size;
+    let initial_plain = &string_no_input[start_target_bitflip..(start_target_bitflip + block_size)];
+    dbg!(&initial_plain);
+    let initial_bytes = c_str_to_bytes(initial_plain);
+    let target = c_str_to_bytes(";admin=true;aaaa");
+    let byte_add_to_get_admin = get_byte_distance(&target, &initial_bytes);
+
+    // work on encrypted
+    let mut encryption = encode_cbc_with_prepend_and_append("");
+    let bitflip_block = &mut encryption[start_of_bitflip..(start_of_bitflip + block_size)];
+    bitflip_block
+        .iter_mut()
+        .zip(byte_add_to_get_admin.into_iter())
+        .for_each(|(byte_initial, byte_to_add)| *byte_initial = *byte_initial ^ byte_to_add);
+    encryption
+}
+
+fn get_byte_distance(target: &[u8], current: &[u8]) -> Vec<u8> {
+    assert!(target.len() == current.len());
+    // dbg!(&target);
+    target
+        .into_iter()
+        .zip(current.into_iter())
+        .map(|(target, current)| target ^ *current)
+        .collect()
+}
+
+fn decode_cbc_find_admin(input_bytes: &[u8]) -> bool {
+    let key;
+    unsafe {
+        key = KEY.clone();
+    }
+    let bytes_decoded = decrypt_cbc(input_bytes, &key, &vec![0u8; 16]);
+    let string_decoded = bytes_as_string(&pkcs_validation(&bytes_decoded).unwrap());
+    dbg!(&string_decoded);
+    string_decoded
+        .split(';')
+        .any(|substr| substr == "admin=true")
+}
+fn encode_cbc_with_prepend_and_append(input_string: &str) -> Vec<u8> {
+    let key;
+    unsafe {
+        key = KEY.clone();
+    }
+    let prepend = "comment1=cooking%20MCs;userdata=";
+    let append = ";comment2=%20like%20a%20pound%20of%20bacon";
+    let quoted_input = quote_out_special_chars(input_string);
+    // dbg!(&quoted_input);
+    let string_to_encrypt = format!("{}{}{}", prepend, quoted_input, append);
+    // dbg!(&string_to_encrypt);
+    let mut bytes_input = c_str_to_bytes(&string_to_encrypt);
+    pcks7_padding(&mut bytes_input, 16);
+    encrypt_cbc(&bytes_input, &key, &vec![0u8; 16])
+}
+
+fn quote_out_special_chars(input: &str) -> String {
+    let special_chars = [';', '='];
+    let results = input
+        .chars()
+        .flat_map(|c| match special_chars.contains(&c) {
+            false => Box::new(std::iter::once(c)) as Box<dyn Iterator<Item = char>>,
+            true => Box::new(
+                std::iter::once('\"')
+                    .chain(std::iter::once(c))
+                    .chain(std::iter::once('\"')),
+            ),
+        })
+        .collect();
+    results
+}
+
+fn ex15() {
+    let test_1 = c_str_to_bytes("ICE ICE BABY\x04\x04\x04\x04");
+    let conversion_1 = pkcs_validation(&test_1);
+    assert!(conversion_1.is_ok());
+    dbg!(&conversion_1.map(|vec| bytes_as_string(&vec)));
+    let test_2 = c_str_to_bytes("ICE ICE BABY\x05\x05\x05\x05");
+    let conversion_2 = pkcs_validation(&test_2);
+    assert!(conversion_2.is_err());
+    let test_3 = c_str_to_bytes("ICE ICE BABY\x01\x02\x03\x04");
+    let conversion_3 = pkcs_validation(&test_3);
+    assert!(conversion_3.is_err());
+}
+
+fn pkcs_validation(padded: &[u8]) -> Result<Vec<u8>, PkcsError> {
+    let len = padded.len();
+    let last = padded.iter().last().ok_or(PkcsError {})?;
+    let num_padding = *last as usize;
+    let candidate = padded.iter().take(len - num_padding).cloned().collect();
+    let padding_validated = padded
+        .into_iter()
+        .skip(len - num_padding)
+        .take(num_padding)
+        .all(|byte| byte == last);
+    match padding_validated {
+        false => Err(PkcsError),
+        true => Ok(candidate),
+    }
 }
 fn ex14() {
     let plain_bytes = decipher_with_prefix_oracle();
