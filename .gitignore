@@ -4,3 +4,5 @@ set1/target
 set1/Cargo.lock
 set3/target
 set3/Cargo.lock
+mt19937/Cargo.lock
+mt19937/target
