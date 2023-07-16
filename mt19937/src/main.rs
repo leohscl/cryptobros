@@ -14,11 +14,76 @@ static mut C_MT: u32 = 0xEFC60000u32;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-struct MT19937 {
-    mt: Vec<u32>,
-    index: usize,
-    lower_mask: u32,
-    upper_mask: u32,
+fn main() {
+    ex21();
+    ex22();
+}
+
+fn ex21() {
+    let mut mt19937 = MT19937::init();
+    mt19937.seed_mt(5489);
+    dbg!(mt19937.extract_number());
+}
+
+fn ex22() {
+    let current_time = get_timestamp();
+    let wait_time_1 = 45;
+    let seed_oracle = current_time + wait_time_1;
+    let mut mt19937 = MT19937::init();
+    mt19937.seed_mt(seed_oracle);
+    dbg!(seed_oracle);
+    let number_gen = mt19937.extract_number();
+    let wait_time_2 = 900;
+    let start_time_hack = seed_oracle + wait_time_2;
+    dbg!(get_seed(start_time_hack, number_gen));
+}
+
+fn invert_tampering(output: u32) -> u32 {
+    let mut output_untampered = output ^ output >> L_MT;
+    unsafe {
+        output_untampered ^= (output_untampered << T_MT) & C_MT;
+        let masked_last_1_to_7 = B_MT & ((1 << 7) - 1);
+        let masked_last_8_to_14 = B_MT & (((1 << 7) - 1) << 7);
+        let masked_last_15_to_21 = B_MT & (((1 << 7) - 1) << 14);
+        let masked_last_22_to_28 = B_MT & (((1 << 7) - 1) << 21);
+        let masked_last_29_to_32 = B_MT & (((1 << 4) - 1) << 28);
+        let last_7_correct = output_untampered & masked_last_1_to_7;
+        let last_14_correct = last_7_correct ^ ((last_7_correct << S_MT) & masked_last_8_to_14);
+        let last_21_correct = last_14_correct ^ ((last_14_correct << S_MT) & masked_last_15_to_21);
+        let last_28_correct = last_21_correct ^ ((last_21_correct << S_MT) & masked_last_22_to_28);
+        output_untampered = last_28_correct ^ ((last_28_correct << S_MT) & masked_last_29_to_32);
+        let mask_last_1_to_11 = (1 << 11) - 1;
+        let mask_last_12_to_23 = mask_last_1_to_11 << 11;
+        let mask_last_24_to_32 = mask_last_1_to_11 << 22;
+        let last_11_correct = output_untampered;
+        let last_22_correct = output_untampered ^ ((last_11_correct << 11) & mask_last_12_to_23);
+        output_untampered = output_untampered ^ ((last_22_correct << 11) & mask_last_24_to_32);
+    }
+    output_untampered
+}
+
+fn get_seed(start_time_hack: u32, number_gen: u32) -> u32 {
+    ((start_time_hack - 2000)..start_time_hack)
+        .into_iter()
+        .find_map(|potential_seed| {
+            let mut mt19937 = MT19937::init();
+            mt19937.seed_mt(potential_seed);
+            let test_num = mt19937.extract_number();
+            if test_num == number_gen {
+                Some(potential_seed)
+            } else {
+                None
+            }
+        })
+        .unwrap()
+}
+
+fn get_timestamp() -> u32 {
+    let start = SystemTime::now();
+    let since_the_epoch = start
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards");
+    (since_the_epoch.as_secs() % (1 << 32)) as u32
 }
 
 impl MT19937 {
@@ -81,50 +146,9 @@ impl MT19937 {
     }
 }
 
-fn main() {
-    ex21();
-    ex22();
-}
-
-fn ex21() {
-    let mut mt19937 = MT19937::init();
-    mt19937.seed_mt(5489);
-    dbg!(mt19937.extract_number());
-}
-
-fn ex22() {
-    let current_time = get_timestamp();
-    let wait_time_1 = 45;
-    let seed_oracle = current_time + wait_time_1;
-    let mut mt19937 = MT19937::init();
-    mt19937.seed_mt(seed_oracle);
-    dbg!(seed_oracle);
-    let number_gen = mt19937.extract_number();
-    let wait_time_2 = 900;
-    let start_time_hack = seed_oracle + wait_time_2;
-    dbg!(get_seed(start_time_hack, number_gen));
-}
-
-fn get_seed(start_time_hack: u32, number_gen: u32) -> u32 {
-    ((start_time_hack - 2000)..start_time_hack)
-        .into_iter()
-        .find_map(|potential_seed| {
-            let mut mt19937 = MT19937::init();
-            mt19937.seed_mt(potential_seed);
-            let test_num = mt19937.extract_number();
-            if test_num == number_gen {
-                Some(potential_seed)
-            } else {
-                None
-            }
-        })
-        .unwrap()
-}
-
-fn get_timestamp() -> u32 {
-    let start = SystemTime::now();
-    let since_the_epoch = start
-        .duration_since(UNIX_EPOCH)
-        .expect("Time went backwards");
-    (since_the_epoch.as_secs() % (1 << 32)) as u32
+struct MT19937 {
+    mt: Vec<u32>,
+    index: usize,
+    lower_mask: u32,
+    upper_mask: u32,
 }
