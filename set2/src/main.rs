@@ -6,6 +6,7 @@ use utils::b64_to_bytes;
 use utils::bytes_as_string;
 use utils::c_str_to_bytes;
 use utils::count_repeating_bytes;
+use utils::decrypt_cbc;
 use utils::decrypt_ecb;
 use utils::encrypt_ecb;
 use utils::fixed_xor;
@@ -113,6 +114,7 @@ fn decode_cbc_find_admin(input_bytes: &[u8]) -> bool {
         .split(';')
         .any(|substr| substr == "admin=true")
 }
+
 fn encode_cbc_with_prepend_and_append(input_string: &str) -> Vec<u8> {
     let key;
     unsafe {

@@ -95,12 +95,9 @@ fn ex24() {
 
     // attack
     for potential_seed in 0..u16::MAX {
-        // for potential_seed in 0..3u32 {
         let mut mt_test = MT19937::init();
-        // dbg!(potential_seed);
         mt_test.seed_mt(potential_seed as u32);
         let potential_decryption = encrypt_mt(&encrypted, &mut mt_test);
-        // dbg!(potential_decryption);
         if &potential_decryption[potential_decryption.len() - 14..potential_decryption.len()]
             == &message
         {
